@@ -1,0 +1,53 @@
+name: Build Binaries (arm64/armv7)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Cross-compile deployment binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # go build 通过 embed 打包前端 dist，必须先构建前端
+      - name: Install frontend deps (workspace)
+        working-directory: web
+        run: bun install
+
+      - name: Build classic frontend
+        working-directory: web/classic
+        run: bun run build
+
+      - name: Build default frontend
+        working-directory: web/default
+        run: bun run build
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Cross-compile arm64 (路由器 ImmortalWrt)
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o new-api-arm64 .
+
+      - name: Cross-compile armv7 (盒子 HiNas Ubuntu 20.04)
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -ldflags "-s -w" -o new-api-armv7 .
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: new-api-binaries
+          path: |
+            new-api-arm64
+            new-api-armv7
