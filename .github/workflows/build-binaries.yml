@@ -4,7 +4,12 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -44,10 +49,23 @@ jobs:
       - name: Cross-compile armv7 (盒子 HiNas Ubuntu 20.04)
         run: CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -ldflags "-s -w" -o new-api-armv7 .
 
-      - name: Upload binaries
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: new-api-binaries
           path: |
             new-api-arm64
             new-api-armv7
+
+      - name: Publish GitHub Release (tag push only)
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            new-api-arm64 \
+            new-api-armv7 \
+            --repo "${{ github.repository }}" \
+            --generate-notes \
+            --title "new-api ${{ github.ref_name }}" \
+            || echo "release 可能已存在，跳过创建"
