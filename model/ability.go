@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/pkg/upstream_guard"
 
 	"github.com/samber/lo"
 	"gorm.io/gorm"
@@ -67,89 +68,89 @@ func GetAllEnableAbilities() []Ability {
 	return abilities
 }
 
-func getPriority(group string, model string, retry int) (int, error) {
-
+func getPriorities(group string, model string) ([]int, error) {
 	var priorities []int
 	err := DB.Model(&Ability{}).
 		Select("DISTINCT(priority)").
 		Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true).
-		Order("priority DESC").              // 按优先级降序排序
-		Pluck("priority", &priorities).Error // Pluck用于将查询的结果直接扫描到一个切片中
-
+		Order("priority DESC").
+		Pluck("priority", &priorities).Error
 	if err != nil {
-		// 处理错误
-		return 0, err
+		return nil, err
 	}
-
-	if len(priorities) == 0 {
-		// 如果没有查询到优先级，则返回错误
-		return 0, errors.New("数据库一致性被破坏")
-	}
-
-	// 确定要使用的优先级
-	var priorityToUse int
-	if retry >= len(priorities) {
-		// 如果重试次数大于优先级数，则使用最小的优先级
-		priorityToUse = priorities[len(priorities)-1]
-	} else {
-		priorityToUse = priorities[retry]
-	}
-	return priorityToUse, nil
+	return priorities, nil
 }
 
-func getChannelQuery(group string, model string, retry int) (*gorm.DB, error) {
-	maxPrioritySubQuery := DB.Model(&Ability{}).Select("MAX(priority)").Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true)
-	channelQuery := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = (?)", group, model, true, maxPrioritySubQuery)
-	if retry != 0 {
-		priority, err := getPriority(group, model, retry)
-		if err != nil {
-			return nil, err
-		} else {
-			channelQuery = DB.Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = ?", group, model, true, priority)
-		}
-	}
-
-	return channelQuery, nil
-}
-
+// GetChannel 从 (group, model) 的启用渠道中按权重随机选出一个渠道。
+// 处于熔断期的 (渠道,模型) 会被跳过；若 retry 对应优先级的渠道全部熔断，则自动下探到
+// 下一优先级，与内存缓存路径（GetRandomSatisfiedChannel）的语义保持一致。
 func GetChannel(group string, model string, retry int) (*Channel, error) {
-	var abilities []Ability
-
-	var err error = nil
-	channelQuery, err := getChannelQuery(group, model, retry)
+	priorities, err := getPriorities(group, model)
 	if err != nil {
 		return nil, err
 	}
-	if common.UsingSQLite || common.UsingPostgreSQL {
-		err = channelQuery.Order("weight DESC").Find(&abilities).Error
-	} else {
-		err = channelQuery.Order("weight DESC").Find(&abilities).Error
-	}
-	if err != nil {
-		return nil, err
-	}
-	channel := Channel{}
-	if len(abilities) > 0 {
-		// Randomly choose one
-		weightSum := uint(0)
-		for _, ability_ := range abilities {
-			weightSum += ability_.Weight + 10
-		}
-		// Randomly choose one
-		weight := common.GetRandomInt(int(weightSum))
-		for _, ability_ := range abilities {
-			weight -= int(ability_.Weight) + 10
-			//log.Printf("weight: %d, ability weight: %d", weight, *ability_.Weight)
-			if weight <= 0 {
-				channel.Id = ability_.ChannelId
-				break
-			}
-		}
-	} else {
+	if len(priorities) == 0 {
 		return nil, nil
 	}
+	for p := retry; p < len(priorities); p++ {
+		channel, allBroken, err := getChannelAtPriority(group, model, priorities[p])
+		if err != nil {
+			return nil, err
+		}
+		if channel != nil {
+			return channel, nil
+		}
+		if !allBroken {
+			return nil, nil
+		}
+		// 该优先级渠道全部熔断，继续下一优先级
+	}
+	return nil, nil
+}
+
+// getChannelAtPriority 在指定优先级内按权重随机选出一个非熔断渠道。
+// 返回 (channel, allBroken, err)：channel 非空表示选中；channel 为空且 allBroken=true
+// 表示该优先级存在渠道但全部熔断，需要调用方下探到下一优先级。
+func getChannelAtPriority(group string, model string, priority int) (*Channel, bool, error) {
+	var abilities []Ability
+	err := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = ?", group, model, true, priority).
+		Order("weight DESC").
+		Find(&abilities).Error
+	if err != nil {
+		return nil, false, err
+	}
+	if len(abilities) == 0 {
+		return nil, false, nil
+	}
+	// 过滤熔断渠道
+	usable := make([]Ability, 0, len(abilities))
+	for _, ability_ := range abilities {
+		if upstream_guard.IsModelOpen(ability_.ChannelId, model) {
+			continue
+		}
+		usable = append(usable, ability_)
+	}
+	if len(usable) == 0 {
+		return nil, true, nil
+	}
+	abilities = usable
+
+	// 按权重随机选一个
+	weightSum := uint(0)
+	for _, ability_ := range abilities {
+		weightSum += ability_.Weight + 10
+	}
+	weight := common.GetRandomInt(int(weightSum))
+	channel := Channel{}
+	for _, ability_ := range abilities {
+		weight -= int(ability_.Weight) + 10
+		if weight <= 0 {
+			channel.Id = ability_.ChannelId
+			break
+		}
+	}
 	err = DB.First(&channel, "id = ?", channel.Id).Error
-	return &channel, err
+	return &channel, false, err
 }
 
 func (channel *Channel) AddAbilities(tx *gorm.DB) error {

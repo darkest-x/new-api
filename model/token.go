@@ -306,6 +306,21 @@ func (token *Token) Update() (err error) {
 	return err
 }
 
+// UpdateKey 仅更新令牌密钥（编辑密钥功能使用），不影响其他字段。
+func (token *Token) UpdateKey() error {
+	return DB.Model(token).Select("key").Updates(token).Error
+}
+
+// CheckTokenKeyExists 判断 key 是否已被其他令牌占用（编辑密钥时的唯一性校验）。
+func CheckTokenKeyExists(key string, excludeId int) (bool, error) {
+	var count int64
+	err := DB.Model(&Token{}).Where("key = ? AND id != ?", key, excludeId).Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 func (token *Token) SelectUpdate() (err error) {
 	defer func() {
 		if shouldUpdateRedis(true, err) {

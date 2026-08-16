@@ -126,6 +126,17 @@ func InitEnv() {
 	SearchRateLimitEnable = GetEnvOrDefaultBool("SEARCH_RATE_LIMIT_ENABLE", true)
 	SearchRateLimitNum = GetEnvOrDefault("SEARCH_RATE_LIMIT", 10)
 	SearchRateLimitDuration = int64(GetEnvOrDefault("SEARCH_RATE_LIMIT_DURATION", 60))
+
+	// 渠道+模型级限速/熔断全局默认值
+	ModelRateLimitMaxWaitSeconds = GetEnvOrDefault("MODEL_RATE_LIMIT_MAX_WAIT_SECONDS", 60)
+	CircuitBreakerDefaultThreshold = GetEnvOrDefault("CIRCUIT_BREAKER_DEFAULT_THRESHOLD", 5)
+	CircuitBreakerDefaultCooldownMinutes = GetEnvOrDefault("CIRCUIT_BREAKER_DEFAULT_COOLDOWN_MINUTES", 5)
+	KeyCircuitBreakerThreshold = GetEnvOrDefault("KEY_CIRCUIT_BREAKER_THRESHOLD", 3)
+	KeyCircuitBreakerCooldownMinutes = GetEnvOrDefault("KEY_CIRCUIT_BREAKER_COOLDOWN_MINUTES", 5)
+
+	// 本地模式（内网自用）：关闭关键安全验证与关键操作限流
+	LocalMode = GetEnvOrDefaultBool("LOCAL_MODE", false)
+
 	initConstantEnv()
 }
 

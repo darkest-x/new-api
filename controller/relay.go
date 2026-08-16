@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
+	"github.com/QuantumNous/new-api/pkg/upstream_guard"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -88,7 +89,12 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	defer func() {
 		if newAPIError != nil {
 			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
-			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
+			errMsg := newAPIError.Error()
+			// 上游限流：给出明确指引，避免客户端只知道 429 而不知如何自助
+			if newAPIError.StatusCode == http.StatusTooManyRequests {
+				errMsg = errMsg + "（请到后台调小该渠道该模型的每分钟请求数，或为该渠道增加更多 key）"
+			}
+			newAPIError.SetMessage(common.MessageWithRequestId(errMsg, requestId))
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
 				helper.WssError(c, ws, newAPIError.ToOpenAIError())
@@ -208,6 +214,23 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
 
+		// 渠道+key+模型级限速：排队等待（客户端保持连接），而非直接返回 429。
+		// 上游限额是 per-key 的，多 key 渠道下每个 key 各自独立限速。
+		// 注意：relay 循环里 ChannelMeta 尚未初始化（handler 内才 InitChannelMeta），
+		// 渠道配置须从 context（SetupContextForSelectedChannel 已写入）读取。
+		channelSetting, _ := common.GetContextKeyType[dto.ChannelSettings](c, constant.ContextKeyChannelSetting)
+		isMultiKey := common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey)
+		if rule, ok := channelSetting.RateLimit[relayInfo.OriginModelName]; ok {
+			keyIndex := 0
+			if isMultiKey {
+				keyIndex = common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex)
+			}
+			if waitErr := upstream_guard.WaitModelRateLimit(c.Request.Context(), channel.Id, keyIndex, relayInfo.OriginModelName, rule, common.ModelRateLimitMaxWaitSeconds); waitErr != nil {
+				newAPIError = types.NewError(waitErr, types.ErrorCodeGetChannelFailed)
+				break
+			}
+		}
+
 		switch relayFormat {
 		case types.RelayFormatOpenAIRealtime:
 			newAPIError = relay.WssHelper(c, relayInfo)
@@ -221,13 +244,38 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		if newAPIError == nil {
 			relayInfo.LastError = nil
+			// 成功：重置该 (渠道,模型) 与 (渠道,key,模型) 的熔断计数
+			model := relayInfo.OriginModelName
+			upstream_guard.RecordModelSuccess(channel.Id, model)
+			if isMultiKey {
+				upstream_guard.RecordKeySuccess(channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex), model)
+			}
 			return
 		}
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
 
-		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, isMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+
+		// 熔断：429 属 key 级限流（每 key 独立熔断），5xx 属渠道级故障（整体熔断）。
+		model := relayInfo.OriginModelName
+		switch {
+		case newAPIError.StatusCode == http.StatusTooManyRequests:
+			if isMultiKey {
+				keyIndex := common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex)
+				upstream_guard.RecordKeyFailure(channel.Id, keyIndex, model, common.KeyCircuitBreakerThreshold, time.Duration(common.KeyCircuitBreakerCooldownMinutes)*time.Minute)
+				// key 级 429：优先同渠道换其他 key 重试
+				c.Set(string(constant.ContextKeyRetrySameChannelId), channel.Id)
+				common.SysLog(fmt.Sprintf("[guard] key 429 换 key 重试 channel=%d key=%d model=%s", channel.Id, keyIndex, model))
+			} else {
+				rule := channelSetting.CircuitBreaker[model]
+				upstream_guard.RecordModelFailure(channel.Id, model, rule, common.CircuitBreakerDefaultThreshold, time.Duration(common.CircuitBreakerDefaultCooldownMinutes)*time.Minute)
+			}
+		case newAPIError.StatusCode/100 == 5:
+			rule := channelSetting.CircuitBreaker[model]
+			upstream_guard.RecordModelFailure(channel.Id, model, rule, common.CircuitBreakerDefaultThreshold, time.Duration(common.CircuitBreakerDefaultCooldownMinutes)*time.Minute)
+		}
 
 		if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
 			break
@@ -302,6 +350,18 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 			AutoBan: &autoBanInt,
 		}, nil
 	}
+	// key 级 429 换 key 重试：优先复用同一渠道（由 GetNextEnabledKeyForModel 选择不同 key）
+	if chId, exists := c.Get(string(constant.ContextKeyRetrySameChannelId)); exists && chId != nil {
+		c.Set(string(constant.ContextKeyRetrySameChannelId), nil)
+		if id, ok := chId.(int); ok {
+			if ch, chErr := model.CacheGetChannel(id); chErr == nil && ch != nil && ch.Status == common.ChannelStatusEnabled {
+				if setupErr := middleware.SetupContextForSelectedChannel(c, ch, info.OriginModelName); setupErr == nil {
+					return ch, nil
+				}
+			}
+		}
+	}
+
 	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
 
 	info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)

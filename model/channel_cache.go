@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/pkg/upstream_guard"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
@@ -131,6 +132,22 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 		normalizedModel := ratio_setting.FormatMatchingModelName(model)
 		channels = group2model2channels[group][normalizedModel]
 	}
+
+	if len(channels) == 0 {
+		return nil, nil
+	}
+
+	// Filter out channels whose (channel, model) circuit breaker is open.
+	// Broken channels are treated as if they do not exist, so the priority
+	// computation naturally falls through to the next tier.
+	usable := make([]int, 0, len(channels))
+	for _, channelId := range channels {
+		if upstream_guard.IsModelOpen(channelId, model) {
+			continue
+		}
+		usable = append(usable, channelId)
+	}
+	channels = usable
 
 	if len(channels) == 0 {
 		return nil, nil

@@ -7,6 +7,33 @@ type ChannelSettings struct {
 	PassThroughBodyEnabled bool   `json:"pass_through_body_enabled,omitempty"`
 	SystemPrompt           string `json:"system_prompt,omitempty"`
 	SystemPromptOverride   bool   `json:"system_prompt_override,omitempty"`
+
+	// RateLimit 渠道+模型级限速（排队等待，不拒绝）。key 为模型名（支持匹配规范化后的名字）。
+	RateLimit map[string]ChannelModelRateLimit `json:"rate_limit,omitempty"`
+	// CircuitBreaker 渠道+模型级熔断。key 为模型名。
+	CircuitBreaker map[string]ChannelModelCircuitBreaker `json:"circuit_breaker,omitempty"`
+}
+
+// ChannelModelRateLimit 单个模型在单个渠道上的限速规则。
+type ChannelModelRateLimit struct {
+	// RPM 每分钟最大请求数，0 表示不限制。
+	RPM int `json:"rpm,omitempty"`
+	// Burst 每分钟窗口内「立即放行」的请求数，0 表示取 rpm/2（前一半不限制、达到一半后摊派）。
+	Burst int `json:"burst,omitempty"`
+	// MaxWaitSeconds 排队最大等待秒数，0 表示使用全局默认（MODEL_RATE_LIMIT_MAX_WAIT_SECONDS）。
+	MaxWaitSeconds int `json:"max_wait_seconds,omitempty"`
+}
+
+// ChannelModelCircuitBreaker 单个模型在单个渠道上的熔断规则。
+type ChannelModelCircuitBreaker struct {
+	// Threshold 连续 429/5xx 达到该次数后熔断，0 表示不熔断（或使用全局默认）。
+	Threshold int `json:"threshold,omitempty"`
+	// Mode 恢复模式："fixed"（固定时长，默认）或 "daily"（每天固定时间恢复）。
+	Mode string `json:"mode,omitempty"`
+	// CooldownMinutes fixed 模式下的熔断时长（分钟），0 表示使用全局默认。
+	CooldownMinutes int `json:"cooldown_minutes,omitempty"`
+	// RecoverAt daily 模式下的恢复时间 "HH:MM"（服务器本地时区）。
+	RecoverAt string `json:"recover_at,omitempty"`
 }
 
 type VertexKeyType string

@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
+
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
@@ -21,6 +23,11 @@ const (
 // 如果未验证或验证已过期，返回 401 错误
 func SecureVerificationRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 本地模式：关闭「查看渠道密钥」的安全验证（2FA/Passkey）
+		if common.LocalMode {
+			c.Next()
+			return
+		}
 		// 检查用户是否已登录
 		userId := c.GetInt("id")
 		if userId == 0 {

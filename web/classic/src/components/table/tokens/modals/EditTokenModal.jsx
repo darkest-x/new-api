@@ -173,7 +173,9 @@ const EditTokenModal = (props) => {
         quotaToDisplayAmount(data.remain_quota || 0).toFixed(6),
       );
       if (formApiRef.current) {
-        formApiRef.current.setValues({ ...getInitValues(), ...data });
+        // key 不回填表单（留空=不修改，避免误提交 masked/旧 key 覆盖）
+        const { key: _omitKey, ...tokenData } = data;
+        formApiRef.current.setValues({ ...getInitValues(), ...tokenData });
       }
     } else {
       showError(message);
@@ -410,6 +412,17 @@ const EditTokenModal = (props) => {
                       />
                     )}
                   </Col>
+                  {isEdit && (
+                    <Col span={24}>
+                      <Form.Input
+                        field='key'
+                        label={t('API 密钥')}
+                        placeholder={t('留空保持不变；填写则覆盖为新密钥')}
+                        showClear
+                        extraText={t('密钥明文存储，个人自用可填简单数字。修改后请使用新密钥调用 API。')}
+                      />
+                    </Col>
+                  )}
                   <Col
                     span={24}
                     style={{

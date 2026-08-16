@@ -229,6 +229,25 @@ var (
 	SearchRateLimitDuration int64 = 60
 )
 
+// 渠道+模型级限速（排队）与熔断的全局默认值，可由环境变量覆盖。
+// 单渠道单模型的精细化规则存储在渠道 setting JSON（dto.ChannelSettings）中，可覆盖这里的默认值。
+var (
+	// ModelRateLimitMaxWaitSeconds 排队等待上限（秒），防止客户端无限等待。
+	ModelRateLimitMaxWaitSeconds = 60
+	// CircuitBreakerDefaultThreshold 渠道+模型熔断的默认连续失败阈值（0=关闭）。
+	CircuitBreakerDefaultThreshold = 5
+	// CircuitBreakerDefaultCooldownMinutes 渠道+模型熔断的默认冷却分钟数。
+	CircuitBreakerDefaultCooldownMinutes = 5
+	// KeyCircuitBreakerThreshold key+模型熔断的默认连续失败阈值（0=关闭）。
+	KeyCircuitBreakerThreshold = 3
+	// KeyCircuitBreakerCooldownMinutes key+模型熔断的默认冷却分钟数。
+	KeyCircuitBreakerCooldownMinutes = 5
+)
+
+// LocalMode 本地模式：关闭「查看渠道密钥」的安全验证（2FA/Passkey）与关键操作限流
+// （CriticalRateLimit/登录限流）。供内网单用户自用，默认关闭以保持生产安全行为。
+var LocalMode = false
+
 var RateLimitKeyExpirationDuration = 20 * time.Minute
 
 const (

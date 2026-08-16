@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/pkg/upstream_guard"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/samber/lo"
@@ -201,6 +202,12 @@ func (channel *Channel) GetKeys() []string {
 }
 
 func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
+	return channel.GetNextEnabledKeyForModel("")
+}
+
+// GetNextEnabledKeyForModel 与 GetNextEnabledKey 相同，但会额外跳过在 (channel, key, model)
+// 上处于熔断期的 key。model 为空时不做该过滤，保持旧行为。
+func (channel *Channel) GetNextEnabledKeyForModel(model string) (string, int, *types.NewAPIError) {
 	// If not in multi-key mode, return the original key string directly.
 	if !channel.ChannelInfo.IsMultiKey {
 		return channel.Key, 0, nil
@@ -228,11 +235,15 @@ func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 		}
 		return common.ChannelStatusEnabled
 	}
+	// 熔断期内的 key 不可用（仅当 model 非空时生效）
+	isKeyBroken := func(idx int) bool {
+		return model != "" && upstream_guard.IsKeyOpen(channel.Id, idx, model)
+	}
 
 	// Collect indexes of enabled keys
 	enabledIdx := make([]int, 0, len(keys))
 	for i := range keys {
-		if getStatus(i) == common.ChannelStatusEnabled {
+		if getStatus(i) == common.ChannelStatusEnabled && !isKeyBroken(i) {
 			enabledIdx = append(enabledIdx, i)
 		}
 	}
@@ -279,7 +290,7 @@ func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 		}
 		for i := 0; i < len(keys); i++ {
 			idx := (start + i) % len(keys)
-			if getStatus(idx) == common.ChannelStatusEnabled {
+			if getStatus(idx) == common.ChannelStatusEnabled && !isKeyBroken(idx) {
 				// update polling index for next call (point to the next position)
 				channel.ChannelInfo.MultiKeyPollingIndex = (idx + 1) % len(keys)
 				return keys[idx], idx, nil

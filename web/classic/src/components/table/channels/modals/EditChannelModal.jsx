@@ -46,6 +46,8 @@ import {
   Col,
   Highlight,
   Input,
+  InputNumber,
+  Select,
   Tooltip,
   Collapse,
   Dropdown,
@@ -83,6 +85,7 @@ import {
   IconBolt,
   IconSearch,
   IconChevronDown,
+  IconInfoCircle,
 } from '@douyinfe/semi-icons';
 
 const { Text, Title } = Typography;
@@ -516,8 +519,172 @@ const EditChannelModal = (props) => {
     pass_through_body_enabled: false,
     system_prompt: '',
   });
+  // 限速与熔断规则（模型级），编辑时同步写入 channel.setting 的 rate_limit / circuit_breaker
+  const [guardRules, setGuardRules] = useState([]);
   const showApiConfigCard = true; // 控制是否显示 API 配置卡片
   const getInitValues = () => ({ ...originInputs });
+
+  // 从 setting 中的 rate_limit / circuit_breaker 构建规则数组
+  const buildGuardRulesFromSettings = (rateLimit, circuitBreaker) => {
+    const models = new Set([
+      ...Object.keys(rateLimit || {}),
+      ...Object.keys(circuitBreaker || {}),
+    ]);
+    return [...models].map((model) => ({
+      model,
+      rpm: rateLimit?.[model]?.rpm || undefined,
+      burst: rateLimit?.[model]?.burst || undefined,
+      maxWait: rateLimit?.[model]?.max_wait_seconds || undefined,
+      threshold: circuitBreaker?.[model]?.threshold || undefined,
+      mode: circuitBreaker?.[model]?.mode || 'fixed',
+      cooldown: circuitBreaker?.[model]?.cooldown_minutes || undefined,
+      recoverAt: circuitBreaker?.[model]?.recover_at || '',
+    }));
+  };
+
+  // 将规则数组写回 channel.setting JSON
+  const buildGuardSetting = (rules) => {
+    const rateLimit = {};
+    const circuitBreaker = {};
+    rules.forEach((r) => {
+      const model = (r.model || '').trim();
+      if (!model) return;
+      const rpm = Number(r.rpm) || 0;
+      if (rpm > 0) {
+        rateLimit[model] = { rpm };
+        if (Number(r.burst) > 0) rateLimit[model].burst = Number(r.burst);
+        if (Number(r.maxWait) > 0)
+          rateLimit[model].max_wait_seconds = Number(r.maxWait);
+      }
+      const threshold = Number(r.threshold) || 0;
+      if (threshold > 0) {
+        circuitBreaker[model] = {
+          threshold,
+          mode: r.mode === 'daily' ? 'daily' : 'fixed',
+        };
+        if (Number(r.cooldown) > 0)
+          circuitBreaker[model].cooldown_minutes = Number(r.cooldown);
+        if (r.recoverAt && r.recoverAt.trim())
+          circuitBreaker[model].recover_at = r.recoverAt.trim();
+      }
+    });
+    return { rateLimit, circuitBreaker };
+  };
+
+  const syncGuardToSetting = (rules) => {
+    const { rateLimit, circuitBreaker } = buildGuardSetting(rules);
+    let base = {};
+    try {
+      base = JSON.parse(inputs.setting || '{}');
+    } catch (e) {
+      base = {};
+    }
+    const next = { ...base, rate_limit: rateLimit, circuit_breaker: circuitBreaker };
+    handleInputChange('setting', JSON.stringify(next));
+  };
+
+  // 单独保存限速/熔断配置（只更新渠道 setting，立即生效，不依赖渠道整体提交）
+  const [savingGuard, setSavingGuard] = useState(false);
+  const saveGuardConfig = async () => {
+    if (!isEdit) {
+      showError(t('请先保存渠道基本信息，再单独保存限速配置'));
+      return;
+    }
+    setSavingGuard(true);
+    try {
+      const { rateLimit, circuitBreaker } = buildGuardSetting(guardRules);
+      let base = {};
+      try {
+        base = JSON.parse(inputs.setting || '{}');
+      } catch (e) {
+        base = {};
+      }
+      const { rate_limit: _rl, circuit_breaker: _cb, ...rest } = base;
+      const payload = {
+        setting: JSON.stringify({
+          ...rest,
+          rate_limit: rateLimit,
+          circuit_breaker: circuitBreaker,
+        }),
+      };
+      const res = await API.put(`/api/channel/${channelId}/setting`, payload);
+      if (res.data && res.data.success === false) {
+        showError(res.data.message || t('保存失败'));
+        return;
+      }
+      showSuccess(t('限速配置已保存并即时生效'));
+    } catch (e) {
+      showError(e?.response?.data?.message || t('保存失败'));
+    } finally {
+      setSavingGuard(false);
+    }
+  };
+
+  const updateGuardRule = (index, field, value) => {
+    const rules = guardRules.map((r, i) =>
+      i === index ? { ...r, [field]: value } : r
+    );
+    setGuardRules(rules);
+    syncGuardToSetting(rules);
+  };
+
+  const addGuardRule = () => {
+    const rules = [
+      ...guardRules,
+      {
+        model: '',
+        rpm: undefined,
+        burst: undefined,
+        maxWait: undefined,
+        threshold: undefined,
+        mode: 'fixed',
+        cooldown: undefined,
+        recoverAt: '',
+      },
+    ];
+    setGuardRules(rules);
+    syncGuardToSetting(rules);
+  };
+
+  const removeGuardRule = (index) => {
+    const rules = guardRules.filter((_, i) => i !== index);
+    setGuardRules(rules);
+    syncGuardToSetting(rules);
+  };
+
+  // 新模型的默认规则（按官方全局默认值预填，便于直接修改后保存）
+  const defaultGuardRule = (model) => ({
+    model,
+    rpm: undefined,
+    burst: undefined,
+    maxWait: undefined,
+    threshold: 5,
+    mode: 'fixed',
+    cooldown: 5,
+    recoverAt: '',
+  });
+
+  // 模型联动：渠道「模型」字段新增模型时，自动为该模型补充默认限速/熔断规则行
+  useEffect(() => {
+    const models = (inputs.models || [])
+      .map((m) => (m || '').trim())
+      .filter(Boolean);
+    if (models.length === 0) return;
+    const existing = new Map(guardRules.map((r) => [r.model, r]));
+    const next = [...guardRules];
+    let changed = false;
+    models.forEach((m) => {
+      if (!existing.has(m)) {
+        next.push(defaultGuardRule(m));
+        changed = true;
+      }
+    });
+    if (changed) {
+      setGuardRules(next);
+      syncGuardToSetting(next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inputs.models]);
 
   // 处理渠道额外设置的更新
   const handleChannelSettingsChange = (key, value) => {
@@ -868,6 +1035,8 @@ const EditChannelModal = (props) => {
           data.system_prompt = parsedSettings.system_prompt || '';
           data.system_prompt_override =
             parsedSettings.system_prompt_override || false;
+          data.rate_limit = parsedSettings.rate_limit || {};
+          data.circuit_breaker = parsedSettings.circuit_breaker || {};
         } catch (error) {
           console.error('解析渠道设置失败:', error);
           data.force_format = false;
@@ -876,6 +1045,8 @@ const EditChannelModal = (props) => {
           data.pass_through_body_enabled = false;
           data.system_prompt = '';
           data.system_prompt_override = false;
+          data.rate_limit = {};
+          data.circuit_breaker = {};
         }
       } else {
         data.force_format = false;
@@ -884,6 +1055,8 @@ const EditChannelModal = (props) => {
         data.pass_through_body_enabled = false;
         data.system_prompt = '';
         data.system_prompt_override = false;
+        data.rate_limit = {};
+        data.circuit_breaker = {};
       }
 
       if (data.settings) {
@@ -994,6 +1167,9 @@ const EditChannelModal = (props) => {
         system_prompt: data.system_prompt,
         system_prompt_override: data.system_prompt_override || false,
       });
+      setGuardRules(
+        buildGuardRulesFromSettings(data.rate_limit, data.circuit_breaker)
+      );
       initialModelsRef.current = (data.models || [])
         .map((model) => (model || '').trim())
         .filter(Boolean);
@@ -1378,6 +1554,8 @@ const EditChannelModal = (props) => {
       system_prompt: '',
       system_prompt_override: false,
     });
+    // 重置限速与熔断规则
+    setGuardRules([]);
     // 重置密钥模式状态
     setKeyMode('append');
     // 重置企业账户状态
@@ -2523,6 +2701,155 @@ const EditChannelModal = (props) => {
 
                   <Form.TextArea field='system_prompt' label={t('系统提示词')} placeholder={t('输入系统提示词，用户的系统提示词将优先于此设置')} onChange={(value) => handleChannelSettingsChange('system_prompt', value)} autosize showClear extraText={t('用户优先：如果用户在请求中指定了系统提示词，将优先使用用户的设置')} />
                   <Form.Switch field='system_prompt_override' label={t('系统提示词拼接')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('system_prompt_override', value)} extraText={t('如果用户请求中包含系统提示词，则使用此设置拼接到用户的系统提示词前面')} />
+
+                  <div className='mt-4 pt-3 border-t border-gray-200'>
+                    <div className='mb-1 text-sm font-medium text-gray-700'>
+                      {t('限速与熔断（渠道+模型级）')}
+                    </div>
+                    <div className='mb-2 text-xs text-gray-400'>
+                      {t('限制指定模型每分钟请求数（超限排队等待、客户端不断开），连续 429/5xx 达阈值后熔断该模型并自动跳过、到时自动恢复。生效情况见后端日志 [guard] 前缀。')}
+                    </div>
+                    {guardRules.length === 0 && (
+                      <div className='mb-2 text-xs text-gray-400'>
+                        {t('未配置任何规则。点击下方按钮为特定模型添加限速/熔断。')}
+                      </div>
+                    )}
+                    {guardRules.map((rule, index) => (
+                      <Card key={index} className='mb-2' bodyStyle={{ padding: '12px 14px' }}>
+                        <Space vertical align='start' style={{ width: '100%' }}>
+                          <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                            <Input
+                              placeholder={t('模型名（如 agnes-2.5-flash）')}
+                              value={rule.model}
+                              onChange={(v) => updateGuardRule(index, 'model', v)}
+                              style={{ width: 240 }}
+                            />
+                            <Button size='small' type='danger' theme='borderless' onClick={() => removeGuardRule(index)}>
+                              {t('删除')}
+                            </Button>
+                          </Space>
+
+                          <div className='text-xs font-medium text-gray-500'>{t('限速（排队等待，不报错）')}</div>
+                          <div className='w-full'>
+                            <div className='mb-0.5 text-xs font-medium text-gray-600 flex items-center'>
+                              rpm
+                              <Tooltip position='top' content={t('该模型每分钟最多请求数，例如上游限 40 次/分钟就填 40。超限后排队等待（客户端不断开、只是变慢），不再直接返回 429。')}>
+                                <IconInfoCircle size='extra-small' className='ml-1 text-gray-400 cursor-help' />
+                              </Tooltip>
+                            </div>
+                            <InputNumber
+                              placeholder={t('每分钟请求数，0/留空=不限')}
+                              value={rule.rpm}
+                              onChange={(v) => updateGuardRule(index, 'rpm', v)}
+                              style={{ width: '100%' }}
+                            />
+                          </div>
+                          <div className='w-full'>
+                            <div className='mb-0.5 text-xs font-medium text-gray-600 flex items-center'>
+                              burst
+                              <Tooltip position='top' content={t('每分钟窗口内「立即放行」的请求数，0/留空 = rpm 的一半。前 burst 个请求不排队，达到后剩余请求按剩余时间均匀摊派（响应变慢而非报错）。')}>
+                                <IconInfoCircle size='extra-small' className='ml-1 text-gray-400 cursor-help' />
+                              </Tooltip>
+                            </div>
+                            <InputNumber
+                              placeholder={t('立即放行数，默认 rpm 的一半')}
+                              value={rule.burst}
+                              onChange={(v) => updateGuardRule(index, 'burst', v)}
+                              style={{ width: '100%' }}
+                            />
+                          </div>
+                          <div className='w-full'>
+                            <div className='mb-0.5 text-xs font-medium text-gray-600 flex items-center'>
+                              max_wait
+                              <Tooltip position='top' content={t('排队等待的最大秒数，超过则返回明确错误（提示调小该模型每分钟请求数）。0/留空 = 60 秒。')}>
+                                <IconInfoCircle size='extra-small' className='ml-1 text-gray-400 cursor-help' />
+                              </Tooltip>
+                            </div>
+                            <InputNumber
+                              placeholder={t('排队上限秒，默认 60')}
+                              value={rule.maxWait}
+                              onChange={(v) => updateGuardRule(index, 'maxWait', v)}
+                              style={{ width: '100%' }}
+                            />
+                          </div>
+
+                          <div className='text-xs font-medium text-gray-500'>{t('熔断（连续 429/5xx 后跳过）')}</div>
+                          <div className='w-full'>
+                            <div className='mb-0.5 text-xs font-medium text-gray-600 flex items-center'>
+                              threshold
+                              <Tooltip position='top' content={t('该模型连续 429/5xx 达到该次数后熔断：选道时跳过该渠道（同渠道其他模型不受影响）。0/留空 = 默认 5。')}>
+                                <IconInfoCircle size='extra-small' className='ml-1 text-gray-400 cursor-help' />
+                              </Tooltip>
+                            </div>
+                            <InputNumber
+                              placeholder={t('连续失败阈值，默认 5')}
+                              value={rule.threshold}
+                              onChange={(v) => updateGuardRule(index, 'threshold', v)}
+                              style={{ width: '100%' }}
+                            />
+                          </div>
+                          <div className='w-full'>
+                            <div className='mb-0.5 text-xs font-medium text-gray-600 flex items-center'>
+                              mode
+                              <Tooltip position='top' content={t('恢复方式：fixed = 熔断后固定冷却 cooldown 分钟自动恢复；daily = 每天到 recover_at 指定时间自动恢复。')}>
+                                <IconInfoCircle size='extra-small' className='ml-1 text-gray-400 cursor-help' />
+                              </Tooltip>
+                            </div>
+                            <Select
+                              value={rule.mode}
+                              onChange={(v) => updateGuardRule(index, 'mode', v)}
+                              style={{ width: '100%' }}
+                            >
+                              <Select.Option value='fixed'>{t('fixed（固定冷却）')}</Select.Option>
+                              <Select.Option value='daily'>{t('daily（每天定点恢复）')}</Select.Option>
+                            </Select>
+                          </div>
+                          <div className='w-full'>
+                            <div className='mb-0.5 text-xs font-medium text-gray-600 flex items-center'>
+                              cooldown
+                              <Tooltip position='top' content={t('fixed 模式下熔断持续的分钟数，到期自动恢复。0/留空 = 默认 5 分钟。')}>
+                                <IconInfoCircle size='extra-small' className='ml-1 text-gray-400 cursor-help' />
+                              </Tooltip>
+                            </div>
+                            <InputNumber
+                              placeholder={t('冷却分钟，默认 5')}
+                              value={rule.cooldown}
+                              onChange={(v) => updateGuardRule(index, 'cooldown', v)}
+                              style={{ width: '100%' }}
+                            />
+                          </div>
+                          <div className='w-full'>
+                            <div className='mb-0.5 text-xs font-medium text-gray-600 flex items-center'>
+                              recover_at
+                              <Tooltip position='top' content={t('daily 模式下每天恢复的固定时间（服务器本地时区），例如上游每日 08:00 重置额度就填 08:00。')}>
+                                <IconInfoCircle size='extra-small' className='ml-1 text-gray-400 cursor-help' />
+                              </Tooltip>
+                            </div>
+                            <Input
+                              placeholder={t('HH:MM，如 08:00')}
+                              value={rule.recoverAt}
+                              onChange={(v) => updateGuardRule(index, 'recoverAt', v)}
+                              style={{ width: '100%' }}
+                            />
+                          </div>
+                        </Space>
+                      </Card>
+                    ))}
+                    <Space style={{ marginTop: 4 }}>
+                      <Button size='small' onClick={addGuardRule}>
+                        {t('添加模型规则')}
+                      </Button>
+                      <Button
+                        size='small'
+                        theme='solid'
+                        type='primary'
+                        loading={savingGuard}
+                        onClick={saveGuardConfig}
+                      >
+                        {t('保存限速配置')}
+                      </Button>
+                    </Space>
+                  </div>
                 </div>
               </div>
             );
@@ -3124,9 +3451,9 @@ const EditChannelModal = (props) => {
                         />
                         {inputs.multi_key_mode === 'polling' && (
                           <Banner
-                            type='warning'
+                            type='info'
                             description={t(
-                              '轮询模式必须搭配Redis和内存缓存功能使用，否则性能将大幅降低，并且无法实现轮询功能',
+                              '单实例部署无需 Redis，轮询功能正常；多实例部署时建议搭配 Redis 与内存缓存，否则各实例独立轮询、无法共享轮询进度。',
                             )}
                             className='!rounded-lg mt-2'
                           />

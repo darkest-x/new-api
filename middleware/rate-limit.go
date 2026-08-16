@@ -102,6 +102,9 @@ func GlobalAPIRateLimit() func(c *gin.Context) {
 }
 
 func CriticalRateLimit() func(c *gin.Context) {
+	if common.LocalMode {
+		return defNext
+	}
 	if common.CriticalRateLimitEnable {
 		return rateLimitFactory(common.CriticalRateLimitNum, common.CriticalRateLimitDuration, "CT")
 	}

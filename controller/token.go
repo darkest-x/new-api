@@ -313,10 +313,37 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.Group = token.Group
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
 	}
+	// 支持编辑时修改密钥（个人自用场景：可自定义简单 key；留空表示不修改）。
+	// 密钥明文存储，仅做长度与唯一性校验，不强制 sk- 前缀。
+	keyChanged := false
+	if token.Key != "" {
+		newKey := strings.TrimSpace(token.Key)
+		if len(newKey) > 128 {
+			common.ApiErrorMsg(c, "密钥长度不能超过 128 字符")
+			return
+		}
+		exists, err := model.CheckTokenKeyExists(newKey, token.Id)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		if exists {
+			common.ApiErrorMsg(c, "该密钥已被其他令牌使用")
+			return
+		}
+		cleanToken.Key = newKey
+		keyChanged = true
+	}
 	err = cleanToken.Update()
 	if err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if keyChanged {
+		if err := cleanToken.UpdateKey(); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

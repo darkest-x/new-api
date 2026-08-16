@@ -38,6 +38,9 @@ const (
 	ContextKeyChannelMultiKeyIndex     ContextKey = "channel_multi_key_index"
 	ContextKeyChannelKey               ContextKey = "channel_key"
 
+	// ContextKeyRetrySameChannelId 标记下一次重试仍使用同一渠道（用于 key 级 429 换 key 重试）
+	ContextKeyRetrySameChannelId ContextKey = "retry_same_channel_id"
+
 	ContextKeyAutoGroup           ContextKey = "auto_group"
 	ContextKeyAutoGroupIndex      ContextKey = "auto_group_index"
 	ContextKeyAutoGroupRetryIndex ContextKey = "auto_group_retry_index"

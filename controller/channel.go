@@ -1083,6 +1083,52 @@ func UpdateChannel(c *gin.Context) {
 	return
 }
 
+// UpdateChannelSetting 仅更新渠道的 setting（限速/熔断等高级配置），
+// 不重建 abilities、不影响其他字段，并立即刷新内存缓存让配置即时生效。
+func UpdateChannelSetting(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	channel, err := model.GetChannelById(id, true)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	var req struct {
+		Setting string `json:"setting"`
+	}
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if req.Setting == "" {
+		channel.Setting = nil
+	} else {
+		if !json.Valid([]byte(req.Setting)) {
+			common.ApiErrorMsg(c, "setting 必须是合法的 JSON")
+			return
+		}
+		channel.Setting = &req.Setting
+	}
+	if err := channel.Save(); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	// 立即刷新内存缓存，限速/熔断配置即时生效（无需等 60s 同步或重启）
+	if err := model.InitChannelCache(); err != nil {
+		common.SysError(fmt.Sprintf("InitChannelCache failed: %v", err))
+	}
+	recordManageAudit(c, "channel.update_setting", map[string]interface{}{
+		"id": id,
+	})
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+	})
+}
+
 // equalStringPtr 比较两个 *string 是否相等（均为 nil 视为相等）。
 func equalStringPtr(a, b *string) bool {
 	if a == nil && b == nil {
