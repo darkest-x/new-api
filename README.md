@@ -406,6 +406,75 @@ docker run --name new-api -d --restart always \
 - `REDIS_CONN_STRING`: Redis cache (recommended)
 - `MEMORY_CACHE_ENABLED`: Memory cache
 
+### 📦 Bare-metal Deployment (ARMv7 / ARM64 Binary)
+
+Every [GitHub Release](https://github.com/darkest-x/new-api/releases) ships statically-compiled binaries:
+
+- `new-api-arm64` — aarch64 (64-bit ARM, e.g. modern NAS / ARM64 router)
+- `new-api-armv7` — ARMv7 / 32-bit ARM (e.g. ARM-based routers / low-end boxes, built with `GOMARM=7`)
+
+```bash
+mkdir -p /root/new-api && cd /root/new-api
+# download the release asset matching your platform, then rename
+mv new-api-armv7 new-api
+chmod +x new-api
+
+# minimal environment file
+cat > .env <<'EOF'
+SESSION_SECRET=replace-with-a-long-random-string
+SQLITE_PATH=/root/new-api/data.db
+LOCAL_MODE=true          # skip 2FA/Passkey verification and admin operation rate limits
+COOKIE_SECURE=false      # required when serving over plain HTTP (no TLS)
+MEMORY_CACHE_ENABLED=true
+EOF
+
+# foreground smoke test
+./new-api --port 8090 --log-dir /root/new-api/logs
+```
+
+**Persist as a systemd service (auto start on boot):**
+
+```ini
+# /etc/systemd/system/new-api.service
+[Unit]
+Description=New API Service
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/root/new-api
+EnvironmentFile=/root/new-api/.env
+ExecStart=/root/new-api/new-api --port 8090 --log-dir /root/new-api/logs
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+systemctl daemon-reload
+systemctl enable --now new-api   # enable = auto start on boot
+systemctl status new-api
+```
+
+**Uninstall / remove:**
+
+```bash
+systemctl disable --now new-api   # stop + remove auto start
+rm /etc/systemd/system/new-api.service
+systemctl daemon-reload
+
+# ⚠️ backup your data before deleting the directory
+cp /root/new-api/.env /root/new-api/data.db /root/new-api/backup/
+rm -rf /root/new-api
+```
+
+> [!TIP]
+> - Rate-limit / circuit-breaker settings are per-channel in the admin UI (**Channel → Edit → Save rate-limit config**), no restart needed.
+> - Channel retry / key failover on upstream `429` only works when **Settings → Operation Settings → Failure Retry Count (RetryTimes) > 0**.
+> - Single-instance deployment does not need Redis; multi-key polling works with the memory cache.
+
 ---
 
 ## 🔗 Related Projects

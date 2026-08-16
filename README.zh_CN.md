@@ -405,6 +405,75 @@ docker run --name new-api -d --restart always \
 - `REDIS_CONN_STRING`：Redis 缓存（推荐）
 - `MEMORY_CACHE_ENABLED`：内存缓存
 
+### 📦 裸机部署（ARMv7 / ARM64 二进制）
+
+每个 [GitHub Release](https://github.com/darkest-x/new-api/releases) 都附带静态编译的二进制：
+
+- `new-api-arm64` — aarch64（64 位 ARM，如新式 NAS / ARM64 路由器）
+- `new-api-armv7` — ARMv7 / 32 位 ARM（如 ARM 路由器 / 低配盒子，`GOMARM=7` 构建）
+
+```bash
+mkdir -p /root/new-api && cd /root/new-api
+# 下载对应平台的 Release 附件后重命名
+mv new-api-armv7 new-api
+chmod +x new-api
+
+# 最小化环境变量文件
+cat > .env <<'EOF'
+SESSION_SECRET=替换为一段长随机字符串
+SQLITE_PATH=/root/new-api/data.db
+LOCAL_MODE=true          # 跳过 2FA/Passkey 验证与后台关键操作限流
+COOKIE_SECURE=false      # 纯 HTTP（无 TLS）部署必须设置
+MEMORY_CACHE_ENABLED=true
+EOF
+
+# 前台试运行
+./new-api --port 8090 --log-dir /root/new-api/logs
+```
+
+**持久化为 systemd 服务（开机自启）：**
+
+```ini
+# /etc/systemd/system/new-api.service
+[Unit]
+Description=New API Service
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/root/new-api
+EnvironmentFile=/root/new-api/.env
+ExecStart=/root/new-api/new-api --port 8090 --log-dir /root/new-api/logs
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+systemctl daemon-reload
+systemctl enable --now new-api   # enable = 开机自启
+systemctl status new-api
+```
+
+**卸载：**
+
+```bash
+systemctl disable --now new-api   # 停止并取消开机自启
+rm /etc/systemd/system/new-api.service
+systemctl daemon-reload
+
+# ⚠️ 删除目录前先备份数据
+cp /root/new-api/.env /root/new-api/data.db /root/new-api/backup/
+rm -rf /root/new-api
+```
+
+> [!TIP]
+> - 限速/熔断为渠道级配置，在后台「渠道 → 编辑 → 保存限速配置」中修改，无需重启。
+> - 上游 `429` 后的换渠道/换 key 重试，前提是 **设置 → 运营设置 → 失败重试次数（RetryTimes）> 0**。
+> - 单实例部署无需 Redis；多 key 轮询配合内存缓存即可。
+
 ---
 
 ## 🔗 相关项目
