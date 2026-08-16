@@ -220,6 +220,38 @@ go run ./scripts/mock_llm_server -addr :8090 -limit-model agnes-2.5-flash -limit
 ## 8. 已知边界与后续扩展点
 
 - 熔断/限速为进程内内存态，重启即清空；多实例需接 Redis（把 `sync.Map` 换成 Redis 键）。
-- 模型级限流器（滑动窗口状态）在进程内创建，修改 `rate_limit.rpm`/`burst` 后需重启生效（或后续加无效化）。
+- 熔断/限速为进程内内存态；修改 `rate_limit.rpm`/`burst` 后限速器自动重建、即时生效（无需重启）；熔断态重启清空。
 - 未覆盖 task/mj 异步任务的限速等待与 key 换 key（选道熔断过滤仍生效）。
 - 后台渠道「设置」目前为 JSON 文本框；如需图形化界面可后续加前端表单。
+
+---
+
+## 9. 部署配置清单（哪些开关配合才生效）
+
+### 9.1 关键环境变量
+
+| 变量 | 默认 | 作用 | 什么时候必须配 |
+|---|---|---|---|
+| `SESSION_SECRET` | 随机 | session 签名 | **必填**（不设启动即 fatal） |
+| `LOCAL_MODE` | `false` | true 关闭「查看密钥」2FA 与登录/关键操作限流 | 内网 HTTP 自用建议 `true`；公网务必 `false` |
+| `COOKIE_SECURE` | `true`（Secure cookie） | cookie 是否仅 HTTPS 发送 | **HTTP 部署必须 `false`**，否则登录成功但点菜单被弹回登录页（实测踩坑） |
+| `MEMORY_CACHE_ENABLED` | `false` | true 选道走内存缓存（多 key 轮询建议开启） | 多 key 轮询/低延迟选道 |
+| `CIRCUIT_BREAKER_DEFAULT_THRESHOLD` | `5` | 模型级熔断默认阈值（0=仅渠道显式配置才熔断） | 想全局默认熔断时 |
+| `CIRCUIT_BREAKER_DEFAULT_COOLDOWN_MINUTES` | `5` | 熔断默认冷却分钟 | 同上 |
+| `KEY_CIRCUIT_BREAKER_THRESHOLD` | `3` | key 级熔断默认阈值 | 多 key 渠道 429 轮换 |
+| `MODEL_RATE_LIMIT_MAX_WAIT_SECONDS` | `60` | 限速排队上限 | 客户端超时较短时调小 |
+
+### 9.2 开关依赖关系（重点，容易忘）
+
+1. **限速排队**：渠道 setting 配 `rate_limit.<模型>.rpm` 即生效，**不需要任何开关**。每 key+模型独立。
+2. **熔断**：`circuit_breaker.<模型>.threshold` 配了就生效；不配则用全局默认（`CIRCUIT_BREAKER_DEFAULT_THRESHOLD`，默认 5）。429 只熔 key（多 key 渠道）、5xx 熔渠道。
+3. **429 换渠道 / 换 key 重试**：**前提是 `RetryTimes > 0`**（系统设置里的 RetryTimes，DB 配置，默认 0=不重试）。限速排队后上游仍 429，靠它换 key/换渠道兜底。**这是最容易漏的**——不配 RetryTimes，429 直接报给客户端。
+4. **auto_ban（渠道自动禁用）**：渠道 `auto_ban=1` + 系统设置 `AutomaticDisableChannelEnabled`（默认关）+ `AutomaticDisableStatusCodes`（默认仅 401）。
+5. **多 key 轮询**：渠道开启多 key + `multi_key_mode=polling`，每 key 独立限速/熔断；单实例无需 Redis。
+6. **CPU/内存保护**：`performance_setting.monitor_enabled`（默认 true）超 `monitor_cpu_threshold`（默认 90）会拒绝 `/v1` 请求——**单机自用建议关闭**，否则本机负载稍高就 503 `system cpu overloaded`。
+
+### 9.3 部署实测提醒
+
+- 建/改渠道后**重启一次**再发请求（选道缓存刷新；或等 60s 自动同步），否则可能报「无可用渠道」。
+- 错误提示默认中文（`i18n` 默认语言已改为 zh-CN）；无效 API Key 会提示「请求中的密钥与任何令牌都不匹配」。
+- 令牌 key 明文存储，编辑令牌可自定义（留空不修改）。
