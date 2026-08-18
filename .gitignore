@@ -61,3 +61,7 @@ skills-lock.json
 *.db-journal*
 *.db-wal*
 *.db-shm*
+
+# local-only: temp & backup docs (contains LAN IPs)
+tmp/
+docs/backup-migration.md
