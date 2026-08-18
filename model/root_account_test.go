@@ -32,7 +32,7 @@ func TestCreateRootAccountIfNeed_Success(t *testing.T) {
 	assert.Equal(t, "root", rootUser.Username)
 	assert.Equal(t, common.RoleRootUser, rootUser.Role)
 	assert.Equal(t, common.UserStatusEnabled, rootUser.Status)
-	assert.Equal(t, 100000000, rootUser.Quota)
+	assert.EqualValues(t, 100000000, rootUser.Quota)
 	assert.NotEmpty(t, rootUser.Password, "password should be hashed and stored")
 }
 

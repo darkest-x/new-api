@@ -63,7 +63,7 @@ func seedUserForQuota(t *testing.T, db *gorm.DB, id int, quota int) {
 	require.NoError(t, db.Create(&model.User{
 		Id:       id,
 		Username: fmt.Sprintf("user_%d", id),
-		Quota:    quota,
+		Quota:    int64(quota),
 		Status:   common.UserStatusEnabled,
 	}).Error)
 }
@@ -83,7 +83,7 @@ func seedTokenForQuota(t *testing.T, db *gorm.DB, id int, userId int, key string
 }
 
 // readUserQuotaFromDB 直接从 DB 读取用户额度（绕过缓存）
-func readUserQuotaFromDB(t *testing.T, db *gorm.DB, id int) int {
+func readUserQuotaFromDB(t *testing.T, db *gorm.DB, id int) int64 {
 	t.Helper()
 	var u model.User
 	require.NoError(t, db.Select("quota").Where("id = ?", id).First(&u).Error)
@@ -134,10 +134,10 @@ func TestDecreaseUserQuotaSafe_ConcurrentNoOverspend(t *testing.T) {
 
 		finalQuota := readUserQuotaFromDB(t, db, 1)
 
-		assert.Equal(t, int64(initialQuota), successCount+failCount, "所有请求应有明确结果")
-		assert.Equal(t, int64(initialQuota), successCount, "成功扣减次数应等于初始余额")
-		assert.Equal(t, int64(goroutines-initialQuota), failCount, "失败次数应为剩余请求")
-		assert.Equal(t, 0, finalQuota, "最终余额应为 0，绝不超扣为负数")
+		assert.EqualValues(t, int64(initialQuota), successCount+failCount, "所有请求应有明确结果")
+		assert.EqualValues(t, int64(initialQuota), successCount, "成功扣减次数应等于初始余额")
+		assert.EqualValues(t, int64(goroutines-initialQuota), failCount, "失败次数应为剩余请求")
+		assert.EqualValues(t, 0, finalQuota, "最终余额应为 0，绝不超扣为负数")
 	})
 }
 
@@ -221,7 +221,7 @@ func TestPostConsumeQuota_RollbackOnTokenFailure(t *testing.T) {
 
 		// 关键断言：用户额度应已回滚到原值
 		finalUserQuota := readUserQuotaFromDB(t, db, userId)
-		assert.Equal(t, userQuota, finalUserQuota,
+		assert.EqualValues(t, userQuota, finalUserQuota,
 			"token 扣减失败后用户额度必须回滚到原值 %d，实际 %d", userQuota, finalUserQuota)
 
 		// token 额度应保持不变（扣减失败）
@@ -248,9 +248,9 @@ func TestDecreaseUserQuotaSafe_InsufficientBalance_NoNegative(t *testing.T) {
 			"错误应为 ErrInsufficientUserQuota，实际: %v", err)
 
 		finalQuota := readUserQuotaFromDB(t, db, userId)
-		assert.Equal(t, initialQuota, finalQuota,
+		assert.EqualValues(t, initialQuota, finalQuota,
 			"余额不足时额度应保持不变，绝不产生负数")
-		assert.GreaterOrEqual(t, finalQuota, 0, "额度绝不为负")
+		assert.GreaterOrEqual(t, finalQuota, int64(0), "额度绝不为负")
 	})
 }
 
@@ -298,12 +298,12 @@ func TestPreConsumeTokenQuota_InsufficientReturnsError(t *testing.T) {
 		// 正常扣减
 		err := PreConsumeTokenQuota(relayInfo, 3)
 		assert.NoError(t, err, "余额足够时应成功")
-		assert.Equal(t, 2, readTokenQuotaFromDB(t, db, tokenId), "扣减后剩余 2")
+		assert.EqualValues(t, 2, readTokenQuotaFromDB(t, db, tokenId), "扣减后剩余 2")
 
 		// 余额不足
 		err = PreConsumeTokenQuota(relayInfo, 10)
 		assert.Error(t, err, "余额不足时应返回错误")
-		assert.Equal(t, 2, readTokenQuotaFromDB(t, db, tokenId), "失败时额度不变")
+		assert.EqualValues(t, 2, readTokenQuotaFromDB(t, db, tokenId), "失败时额度不变")
 	})
 }
 
@@ -328,7 +328,7 @@ func TestPreConsumeTokenQuota_UnlimitedTokenSkipped(t *testing.T) {
 
 		err := PreConsumeTokenQuota(relayInfo, 50)
 		assert.NoError(t, err, "无限额度令牌应直接返回成功")
-		assert.Equal(t, initialRemain, readTokenQuotaFromDB(t, db, tokenId),
+		assert.EqualValues(t, initialRemain, readTokenQuotaFromDB(t, db, tokenId),
 			"无限额度令牌额度不应被扣减")
 	})
 }

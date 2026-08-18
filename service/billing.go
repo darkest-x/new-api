@@ -38,19 +38,19 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 
 		if delta > 0 {
 			logger.LogInfo(ctx, fmt.Sprintf("预扣费后补扣费：%s（实际消耗：%s，预扣费：%s）",
-				logger.FormatQuota(delta),
-				logger.FormatQuota(actualQuota),
-				logger.FormatQuota(preConsumed),
+				logger.FormatQuota(int64(delta)),
+				logger.FormatQuota(int64(actualQuota)),
+				logger.FormatQuota(int64(preConsumed)),
 			))
 		} else if delta < 0 {
 			logger.LogInfo(ctx, fmt.Sprintf("预扣费后返还扣费：%s（实际消耗：%s，预扣费：%s）",
-				logger.FormatQuota(-delta),
-				logger.FormatQuota(actualQuota),
-				logger.FormatQuota(preConsumed),
+				logger.FormatQuota(-int64(delta)),
+				logger.FormatQuota(int64(actualQuota)),
+				logger.FormatQuota(int64(preConsumed)),
 			))
 		} else {
 			logger.LogInfo(ctx, fmt.Sprintf("预扣费与实际消耗一致，无需调整：%s（按次计费）",
-				logger.FormatQuota(actualQuota),
+				logger.FormatQuota(int64(actualQuota)),
 			))
 		}
 

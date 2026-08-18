@@ -45,12 +45,12 @@ func TestUserCheckinWithoutTransaction_Success(t *testing.T) {
 	// 签到记录已写入
 	var got Checkin
 	require.NoError(t, DB.Where("user_id = ?", user.Id).First(&got).Error)
-	assert.Equal(t, 100, got.QuotaAwarded)
+	assert.EqualValues(t, 100, got.QuotaAwarded)
 
 	// 用户额度已增加
 	var updated User
 	require.NoError(t, DB.First(&updated, user.Id).Error)
-	assert.Equal(t, 100, updated.Quota)
+	assert.EqualValues(t, 100, updated.Quota)
 }
 
 // TestUserCheckinWithoutTransaction_RollbackOnQuotaFail 验证 IncreaseUserQuota 失败时
@@ -90,7 +90,7 @@ func TestUserCheckinWithoutTransaction_RollbackOnQuotaFail(t *testing.T) {
 	// 用户额度保持不变
 	var updated User
 	require.NoError(t, DB.First(&updated, user.Id).Error)
-	assert.Equal(t, 0, updated.Quota)
+	assert.EqualValues(t, 0, updated.Quota)
 }
 
 // TestUserCheckinWithoutTransaction_CreateFail 验证 Create 失败时返回错误且不调用 IncreaseUserQuota。
@@ -132,10 +132,10 @@ func TestUserCheckinWithoutTransaction_CreateFail(t *testing.T) {
 	// 用户额度保持 0（IncreaseUserQuota 未被调用）
 	var updated User
 	require.NoError(t, DB.First(&updated, user.Id).Error)
-	assert.Equal(t, 0, updated.Quota)
+	assert.EqualValues(t, 0, updated.Quota)
 
 	// 原签到记录仍存在且 QuotaAwarded 不变
 	var got Checkin
 	require.NoError(t, DB.Where("user_id = ?", user.Id).First(&got).Error)
-	assert.Equal(t, 100, got.QuotaAwarded)
+	assert.EqualValues(t, 100, got.QuotaAwarded)
 }

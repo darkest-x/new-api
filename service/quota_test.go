@@ -28,7 +28,7 @@ func TestQuotaDeduction_UserInsufficient(t *testing.T) {
 	assert.True(t, errors.Is(err, model.ErrInsufficientUserQuota),
 		"应返回 ErrInsufficientUserQuota，实际: %v", err)
 
-	assert.Equal(t, initialQuota, getUserQuota(t, userID),
+	assert.EqualValues(t, initialQuota, getUserQuota(t, userID),
 		"余额不足时额度应保持不变")
 }
 
@@ -45,7 +45,7 @@ func TestQuotaDeduction_UserSufficient(t *testing.T) {
 	err := model.DecreaseUserQuotaSafe(userID, consumeQuota)
 	require.NoError(t, err)
 
-	assert.Equal(t, initialQuota-consumeQuota, getUserQuota(t, userID),
+	assert.EqualValues(t, initialQuota-consumeQuota, getUserQuota(t, userID),
 		"扣减后额度应正确减少")
 }
 
@@ -85,10 +85,10 @@ func TestQuotaDeduction_ConcurrentNoOverspend(t *testing.T) {
 		finalQuota := readUserQuotaFromDB(t, db, 1)
 
 		assert.Equal(t, int64(goroutines), successCount+failCount, "所有请求应有明确结果")
-		assert.Equal(t, int64(initialQuota), successCount, "成功扣减次数应等于初始余额")
-		assert.Equal(t, int64(goroutines-initialQuota), failCount, "失败次数应为剩余请求")
-		assert.Equal(t, 0, finalQuota, "最终余额应为 0，绝不超扣为负数")
-		assert.GreaterOrEqual(t, finalQuota, 0, "额度绝不为负")
+		assert.EqualValues(t, int64(initialQuota), successCount, "成功扣减次数应等于初始余额")
+		assert.EqualValues(t, int64(goroutines-initialQuota), failCount, "失败次数应为剩余请求")
+		assert.EqualValues(t, 0, finalQuota, "最终余额应为 0，绝不超扣为负数")
+		assert.GreaterOrEqual(t, finalQuota, int64(0), "额度绝不为负")
 	})
 }
 
@@ -110,7 +110,7 @@ func TestQuotaDeduction_TokenInsufficient(t *testing.T) {
 	assert.True(t, errors.Is(err, model.ErrInsufficientTokenQuota),
 		"应返回 ErrInsufficientTokenQuota，实际: %v", err)
 
-	assert.Equal(t, tokenRemain, getTokenRemainQuota(t, tokenID),
+	assert.EqualValues(t, tokenRemain, getTokenRemainQuota(t, tokenID),
 		"余额不足时 token 额度应保持不变")
 }
 
@@ -129,6 +129,6 @@ func TestQuotaDeduction_TokenSufficient(t *testing.T) {
 	err := model.DecreaseTokenQuotaSafe(tokenID, "sk-quota-token-sufficient", consumeQuota)
 	require.NoError(t, err)
 
-	assert.Equal(t, tokenRemain-consumeQuota, getTokenRemainQuota(t, tokenID),
+	assert.EqualValues(t, tokenRemain-consumeQuota, getTokenRemainQuota(t, tokenID),
 		"扣减后 token 额度应正确减少")
 }

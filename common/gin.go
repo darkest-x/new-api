@@ -170,6 +170,17 @@ func GetContextKeyInt(c *gin.Context, key constant.ContextKey) int {
 	return c.GetInt(string(key))
 }
 
+// GetContextKeyInt64 读取 int64 类型的 context 值（如用户额度）。
+// context 中存放 int64 时不能使用 GetContextKeyInt（gin 的 GetInt 只断言 int，会静默返回 0）。
+func GetContextKeyInt64(c *gin.Context, key constant.ContextKey) int64 {
+	if v, ok := c.Get(string(key)); ok {
+		if iv, ok := v.(int64); ok {
+			return iv
+		}
+	}
+	return 0
+}
+
 func GetContextKeyBool(c *gin.Context, key constant.ContextKey) bool {
 	return c.GetBool(string(key))
 }

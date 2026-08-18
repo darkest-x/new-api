@@ -57,7 +57,7 @@ func TestGetUserCheckinStats_Success(t *testing.T) {
 	require.NotNil(t, stats)
 
 	assert.Equal(t, int64(2), stats["total_checkins"], "total_checkins should be 2")
-	assert.Equal(t, int64(300), stats["total_quota"], "total_quota should be 300")
+	assert.EqualValues(t, int64(300), stats["total_quota"], "total_quota should be 300")
 	assert.Equal(t, 2, stats["checkin_count"], "checkin_count should be 2")
 	assert.Equal(t, true, stats["checked_in_today"], "checked_in_today should be true")
 }
@@ -82,7 +82,7 @@ func TestGetUserCheckinStats_NoRecords(t *testing.T) {
 	require.NotNil(t, stats)
 
 	assert.Equal(t, int64(0), stats["total_checkins"])
-	assert.Equal(t, int64(0), stats["total_quota"])
+	assert.EqualValues(t, int64(0), stats["total_quota"])
 	assert.Equal(t, 0, stats["checkin_count"])
 	assert.Equal(t, false, stats["checked_in_today"])
 }

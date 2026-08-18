@@ -186,7 +186,7 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 
 	logQuota = quotaToAdd
 	// Phase 2-D：使用订单已存的 tenant_id 写日志（不改支付流程）
-	RecordTopupLogWithTenant(topUp.UserId, topUp.TenantID, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%d", logger.FormatQuota(logQuota), topUp.Amount), callerIp, topUp.PaymentMethod, PaymentMethodStripe)
+	RecordTopupLogWithTenant(topUp.UserId, topUp.TenantID, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%d", logger.FormatQuota(int64(logQuota)), topUp.Amount), callerIp, topUp.PaymentMethod, PaymentMethodStripe)
 
 	return nil
 }
@@ -458,7 +458,7 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 
 	// 事务外记录日志，避免阻塞
 	// Phase 2-D：使用订单已存的 tenant_id 写日志
-	RecordTopupLogWithTenant(userId, topUpTenantID, fmt.Sprintf("管理员补单成功，充值金额: %v，支付金额：%f", logger.FormatQuota(quotaToAdd), payMoney), callerIp, paymentMethod, "admin")
+	RecordTopupLogWithTenant(userId, topUpTenantID, fmt.Sprintf("管理员补单成功，充值金额: %v，支付金额：%f", logger.FormatQuota(int64(quotaToAdd)), payMoney), callerIp, paymentMethod, "admin")
 	return nil
 }
 func RechargeCreem(referenceId string, customerEmail string, customerName string, callerIp string) (err error) {
@@ -609,7 +609,7 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 		if cacheErr := invalidateUserCache(topUp.UserId); cacheErr != nil {
 			common.SysError(fmt.Sprintf("waffo recharge: invalidateUserCache failed, user_id=%d, err=%v", topUp.UserId, cacheErr))
 		}
-		RecordTopupLogWithTenant(topUp.UserId, topUp.TenantID, fmt.Sprintf("Waffo充值成功，充值额度: %v，支付金额: %.2f", logger.FormatQuota(quotaToAdd), topUp.Money), callerIp, topUp.PaymentMethod, PaymentMethodWaffo)
+		RecordTopupLogWithTenant(topUp.UserId, topUp.TenantID, fmt.Sprintf("Waffo充值成功，充值额度: %v，支付金额: %.2f", logger.FormatQuota(int64(quotaToAdd)), topUp.Money), callerIp, topUp.PaymentMethod, PaymentMethodWaffo)
 	}
 
 	return nil
@@ -675,7 +675,7 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 			common.SysError(fmt.Sprintf("waffo pancake recharge: invalidateUserCache failed, user_id=%d, err=%v", topUp.UserId, cacheErr))
 		}
 		// Phase 2-D：Waffo Pancake 回调路径无 c，使用订单已存的 tenant_id 写日志（不改支付流程）
-		if logErr := RecordLogWithTenant(topUp.UserId, topUp.TenantID, LogTypeTopup, fmt.Sprintf("Waffo Pancake充值成功，充值额度: %v，支付金额: %.2f", logger.FormatQuota(quotaToAdd), topUp.Money)); logErr != nil {
+		if logErr := RecordLogWithTenant(topUp.UserId, topUp.TenantID, LogTypeTopup, fmt.Sprintf("Waffo Pancake充值成功，充值额度: %v，支付金额: %.2f", logger.FormatQuota(int64(quotaToAdd)), topUp.Money)); logErr != nil {
 			// P4-5：充值已到账但日志未落库，运维需对账 user quota 是否一致。
 			common.SysError(fmt.Sprintf(
 				"RecordLog failed: log_persist_required=true, user_id=%d, log_type=%d, err=%v",

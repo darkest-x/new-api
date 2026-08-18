@@ -146,7 +146,7 @@ func LogQuota(quota int) string {
 	}
 }
 
-func FormatQuota(quota int) string {
+func FormatQuota(quota int64) string {
 	q := float64(quota)
 	switch operation_setting.GetQuotaDisplayType() {
 	case operation_setting.QuotaDisplayTypeCNY:

@@ -61,7 +61,7 @@ func TestSaveQuotaDataCache_InsertNew(t *testing.T) {
 	assert.Equal(t, "testuser", saved.Username)
 	assert.Equal(t, "test-model", saved.ModelName)
 	assert.Equal(t, 5, saved.Count)
-	assert.Equal(t, 1000, saved.Quota)
+	assert.EqualValues(t, 1000, saved.Quota)
 	assert.Equal(t, 500, saved.TokenUsed)
 
 	// 验证缓存已清空
@@ -106,7 +106,7 @@ func TestSaveQuotaDataCache_UpdateExisting(t *testing.T) {
 	var updated QuotaData
 	require.NoError(t, DB.Table("quota_data").Where("user_id = ? AND model_name = ?", 200, "existing-model").First(&updated).Error)
 	assert.Equal(t, 5, updated.Count, "expected count to be accumulated")
-	assert.Equal(t, 1000, updated.Quota, "expected quota to be accumulated")
+	assert.EqualValues(t, 1000, updated.Quota, "expected quota to be accumulated")
 	assert.Equal(t, 500, updated.TokenUsed, "expected token_used to be accumulated")
 
 	// 验证没有产生重复记录

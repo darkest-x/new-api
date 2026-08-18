@@ -9,8 +9,8 @@ import (
 )
 
 func GetSubscription(c *gin.Context) {
-	var remainQuota int
-	var usedQuota int
+	var remainQuota int64
+	var usedQuota int64
 	var err error
 	var token *model.Token
 	var expiredTime int64
@@ -29,8 +29,8 @@ func GetSubscription(c *gin.Context) {
 			return
 		}
 		expiredTime = token.ExpiredTime
-		remainQuota = token.RemainQuota
-		usedQuota = token.UsedQuota
+		remainQuota = int64(token.RemainQuota)
+		usedQuota = int64(token.UsedQuota)
 	} else {
 		userId := c.GetInt("id")
 		// P4-1 修复：禁止 err 覆盖。GetUserQuota 与 GetUserUsedQuota 各自独立检查错误，
@@ -102,7 +102,7 @@ func GetSubscription(c *gin.Context) {
 }
 
 func GetUsage(c *gin.Context) {
-	var quota int
+	var quota int64
 	var err error
 	var token *model.Token
 	if common.DisplayTokenStatEnabled {
@@ -119,7 +119,7 @@ func GetUsage(c *gin.Context) {
 			})
 			return
 		}
-		quota = token.UsedQuota
+		quota = int64(token.UsedQuota)
 	} else {
 		userId := c.GetInt("id")
 		quota, err = model.GetUserUsedQuota(userId)
