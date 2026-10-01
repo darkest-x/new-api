@@ -64,4 +64,4 @@ skills-lock.json
 
 # local-only: temp & backup docs (contains LAN IPs)
 tmp/
-docs/backup-migration.md
+docs/fork/backup-migration.md
