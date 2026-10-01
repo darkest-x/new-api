@@ -39,6 +39,16 @@ web/             — Frontend themes container
   web/default/src/i18n/ — Frontend internationalization (i18next, zh/en/fr/ru/ja/vi)
 ```
 
+## Fork Documentation (二次开发文档)
+
+This repo is a fork of QuantumNous/new-api with local enhancements. **All fork-specific features are documented in `docs/fork/` — start from `docs/fork/README.md`** (feature list, doc mapping, commit changelog, maintenance conventions):
+
+- `docs/fork/upstream-guard.md` — per-key/model rate-limit queue + circuit breaker + LOCAL_MODE (deployment checklist in §9)
+- `docs/fork/agentrouter-wire-image.md` — AgentRouter WAF direct connection via channel `header_override`
+- `docs/fork/backup-migration.md` — backup/migration runbook (**local-only, gitignored, contains LAN info — never push**)
+
+Upstream docs live in `docs/` root and subdirectories — **do not modify them**; sync from upstream may overwrite them freely. When changing fork features, update the matching doc in `docs/fork/` and register it in `docs/fork/README.md`.
+
 ## Internationalization (i18n)
 
 ### Backend (`i18n/`)
